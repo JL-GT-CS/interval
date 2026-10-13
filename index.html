@@ -1,0 +1,904 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interval — spaced repetition for algorithm practice</title>
+<style>
+:root{
+  --ground:#12161d; --panel:#1a1f28; --panel-2:#212833; --rule:#2c3542; --rule-soft:#232a35;
+  --text:#e4e8ee; --text-dim:#8e9aab; --text-faint:#64707f;
+  --r-high:#4fd1c5; --r-mid:#3e8e8a; --r-low:#46555f;
+  --lamp:#e3b341; --lamp-dim:#8a6f2c;
+  --focus:#7fd8ff;
+  --sans:ui-sans-serif,-apple-system,"Segoe UI Variable Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--ground); color:var(--text); font-family:var(--sans);
+  font-size:16px; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+.num{font-family:var(--mono); font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1}
+button,input,textarea,select{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--focus); outline-offset:2px}
+h1{font-size:27px; font-weight:600; line-height:1.18; letter-spacing:-.022em; margin:0}
+h2,h3{font-weight:600; line-height:1.2; margin:0}
+
+/* ---------- chrome ---------- */
+.topbar{
+  display:flex; align-items:baseline; gap:28px; flex-wrap:wrap;
+  padding:14px 24px; border-bottom:1px solid var(--rule); background:var(--panel);
+  position:sticky; top:0; z-index:10;
+}
+.brand{font-size:15px; font-weight:600; letter-spacing:-.01em}
+.brand span{color:var(--r-mid); font-family:var(--mono)}
+nav{display:flex; gap:4px; flex-wrap:wrap; margin-left:auto}
+nav button{
+  background:none; border:1px solid transparent; border-radius:3px;
+  padding:5px 11px; font-size:14px; color:var(--text-dim); cursor:pointer;
+}
+nav button:hover{color:var(--text); background:var(--panel-2)}
+nav button[aria-current="page"]{color:var(--text); border-color:var(--rule); background:var(--panel-2)}
+main{max-width:980px; margin:0 auto; padding:34px 24px 90px}
+.wide{max-width:980px}
+.narrow{max-width:650px}
+
+/* ---------- readings ---------- */
+.readings{display:flex; gap:44px; align-items:flex-end; flex-wrap:wrap; margin-bottom:6px}
+.reading .v{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:46px; line-height:1; letter-spacing:-.03em}
+.reading .k{font-size:13px; color:var(--text-dim); margin-top:7px}
+.reading.lamp .v{color:var(--lamp)}
+.reading.quiet .v{color:var(--text-faint)}
+
+/* ---------- queue ---------- */
+.queue{margin-top:-1px}
+.row{
+  display:grid; grid-template-columns:1fr 160px 108px;
+  gap:18px; align-items:center;
+  padding:15px 2px; border-bottom:1px solid var(--rule-soft);
+}
+.row .t{font-size:16px; letter-spacing:-.01em}
+.row .t b{font-weight:600}
+.row .t .id{font-family:var(--mono); color:var(--text-faint); font-size:13px; margin-right:9px}
+.row .meta{font-size:13px; color:var(--text-dim); margin-top:4px; display:flex; gap:22px; flex-wrap:wrap}
+.row .meta em{color:var(--lamp); font-style:normal}
+.meter{display:flex; align-items:center; gap:10px}
+.bar{height:7px; flex:1; background:#20262f; border-radius:1px; overflow:hidden}
+.bar i{display:block; height:100%}
+.pct{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:13px; width:42px; text-align:right; color:var(--text-dim); padding-right:4px}
+.rowact{text-align:right}
+
+/* ---------- buttons ---------- */
+.btn{
+  background:var(--panel-2); border:1px solid var(--rule); border-radius:3px;
+  padding:7px 15px; font-size:14px; cursor:pointer; color:var(--text);
+}
+.btn:hover:not(:disabled){border-color:#3e4a5a; background:#273040}
+.btn:disabled{opacity:.4; cursor:not-allowed}
+.btn.key{background:#15453f; border-color:#1f6459; color:#c9f5ef}
+.btn.key:hover:not(:disabled){background:#1a564e; border-color:#2a7f72}
+.btn.ghost{background:none}
+.btn.sm{padding:4px 10px; font-size:13px}
+
+/* ---------- panels & prose ---------- */
+.panel{background:var(--panel); border:1px solid var(--rule); border-radius:4px; padding:22px}
+.panel + .panel{margin-top:16px}
+.lede{color:var(--text-dim); max-width:62ch}
+.h-sec{font-size:13px; color:var(--text-faint); margin:34px 0 12px; border-bottom:1px solid var(--rule-soft); padding-bottom:7px}
+p{margin:0 0 12px} p:last-child{margin-bottom:0}
+textarea{
+  width:100%; min-height:124px; resize:vertical; background:#0e1217;
+  border:1px solid var(--rule); border-radius:3px; padding:12px; line-height:1.55;
+  font-family:var(--mono); font-size:13.5px;
+}
+input[type=text],input[type=date],input[type=number]{
+  background:#0e1217; border:1px solid var(--rule); border-radius:3px; padding:8px 10px;
+}
+label{display:block; font-size:13px; color:var(--text-dim); margin-bottom:6px}
+.field{margin-bottom:18px}
+
+/* ---------- scale (confidence / rubric) ---------- */
+.scale{display:grid; gap:8px; margin:4px 0 0}
+.scale button{
+  display:grid; grid-template-columns:30px 1fr; gap:12px; text-align:left;
+  background:#0e1217; border:1px solid var(--rule); border-radius:3px;
+  padding:11px 13px; cursor:pointer;
+}
+.scale button:hover{border-color:#3e4a5a}
+.scale button[aria-pressed="true"]{border-color:var(--r-mid); background:#14272a}
+.scale .lv{font-family:var(--mono); font-size:17px; color:var(--r-mid)}
+.scale .d{font-size:14px; line-height:1.45}
+
+/* ---------- reveal ---------- */
+.sketch{
+  background:#0e1217; border:1px solid var(--rule); border-left:2px solid var(--rule);
+  border-radius:3px; padding:13px; font-family:var(--mono); font-size:13.5px;
+  white-space:pre-wrap; line-height:1.6;
+}
+.sketch.prior{border-left-color:var(--r-mid)}
+.reveal{animation:fade .45s ease both}
+@keyframes fade{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+.verdict{display:flex; align-items:baseline; gap:16px; flex-wrap:wrap}
+.verdict .was{font-family:var(--mono); font-size:30px; color:var(--text-faint); text-decoration:line-through; text-decoration-thickness:1px}
+.verdict .now{font-family:var(--mono); font-size:46px; line-height:1; color:var(--r-high); letter-spacing:-.03em}
+.verdict .u{font-size:14px; color:var(--text-dim)}
+
+/* ---------- calibration matrix ---------- */
+.cal{display:grid; grid-template-columns:auto repeat(4,1fr); gap:3px; max-width:430px}
+.cal div{display:flex; align-items:center; justify-content:center; height:46px; font-family:var(--mono); font-size:13px; border-radius:2px}
+.cal .ax{color:var(--text-faint); background:none; height:auto; min-height:26px}
+.cal .cell{background:#0e1217; border:1px solid var(--rule-soft); color:var(--text)}
+.cal .cell.diag{border-color:#3e4a5a}
+.axis-note{font-size:13px; color:var(--text-dim); margin-top:10px; max-width:52ch}
+
+table{width:100%; border-collapse:collapse; font-size:14px}
+th{text-align:left; font-weight:500; color:var(--text-faint); font-size:13px; padding:0 10px 8px 0; border-bottom:1px solid var(--rule)}
+td{padding:9px 10px 9px 0; border-bottom:1px solid var(--rule-soft)}
+td.n{font-family:var(--mono); font-variant-numeric:tabular-nums}
+
+.empty{border:1px dashed var(--rule); border-radius:4px; padding:30px; text-align:center; color:var(--text-dim)}
+.steps{display:flex; gap:7px; margin-bottom:26px}
+.steps i{height:2px; flex:1; background:var(--rule)}
+.steps i.on{background:var(--r-mid)}
+.rowbtns{display:flex; gap:10px; margin-top:22px; flex-wrap:wrap}
+.foot{margin-top:46px; padding-top:18px; border-top:1px solid var(--rule-soft); font-size:13px; color:var(--text-faint)}
+.pill{font-family:var(--mono); font-size:12px; color:var(--text-dim); border:1px solid var(--rule); border-radius:2px; padding:1px 6px}
+
+@media (max-width:700px){
+  main{padding:24px 16px 70px}
+  .row{grid-template-columns:1fr; gap:10px}
+  .rowact{text-align:left}
+  .reading .v{font-size:36px}
+  .readings{gap:28px}
+  nav{width:100%; margin-left:0}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important; transition:none !important}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">Interval<span>/</span>algorithms</div>
+  <nav id="nav"></nav>
+</header>
+
+<main id="app"></main>
+
+<script>
+"use strict";
+
+/* =========================================================================
+   Deck — 24 problems across arrays, hashing, and two pointers.
+   ====================================================================== */
+const DECK = [
+  {id:1,   t:"Two Sum",                              p:"hashing",      q:"Return indices of the two numbers that add to a target."},
+  {id:217, t:"Contains Duplicate",                    p:"hashing",      q:"Decide whether any value appears more than once."},
+  {id:242, t:"Valid Anagram",                         p:"hashing",      q:"Decide whether two strings are anagrams of each other."},
+  {id:49,  t:"Group Anagrams",                        p:"hashing",      q:"Group a list of strings so anagrams land together."},
+  {id:347, t:"Top K Frequent Elements",               p:"hashing",      q:"Return the k most frequent values in an array."},
+  {id:238, t:"Product of Array Except Self",          p:"arrays",       q:"For each index, the product of all other elements, without division."},
+  {id:36,  t:"Valid Sudoku",                          p:"hashing",      q:"Decide whether a partially filled 9x9 board breaks no rule."},
+  {id:128, t:"Longest Consecutive Sequence",          p:"hashing",      q:"Length of the longest run of consecutive integers present."},
+  {id:146, t:"LRU Cache",                             p:"hashing",      q:"Design a cache with O(1) get and put that evicts least-recently-used."},
+  {id:560, t:"Subarray Sum Equals K",                 p:"hashing",      q:"Count the subarrays whose sum equals k."},
+  {id:219, t:"Contains Duplicate II",                 p:"hashing",      q:"Decide whether a duplicate exists within a window of k indices."},
+  {id:136, t:"Single Number",                         p:"arrays",       q:"Every value appears twice except one. Find it in O(1) space."},
+  {id:53,  t:"Maximum Subarray",                      p:"arrays",       q:"Largest sum of any contiguous subarray."},
+  {id:169, t:"Majority Element",                      p:"arrays",       q:"Find the value appearing more than n/2 times, in O(1) space."},
+  {id:448, t:"Find All Numbers Disappeared",          p:"arrays",       q:"Values in 1..n are missing from the array. Find them in place."},
+  {id:41,  t:"First Missing Positive",                p:"arrays",       q:"Smallest missing positive integer, in O(n) time and O(1) space."},
+  {id:125, t:"Valid Palindrome",                      p:"two pointers", q:"Decide whether a string reads the same ignoring case and non-alphanumerics."},
+  {id:167, t:"Two Sum II (sorted input)",             p:"two pointers", q:"Two indices summing to a target, given a sorted array."},
+  {id:15,  t:"3Sum",                                  p:"two pointers", q:"All unique triplets that sum to zero."},
+  {id:11,  t:"Container With Most Water",             p:"two pointers", q:"Pick two lines forming the container holding the most water."},
+  {id:42,  t:"Trapping Rain Water",                   p:"two pointers", q:"Total water trapped by an elevation map."},
+  {id:283, t:"Move Zeroes",                           p:"two pointers", q:"Move all zeroes to the end in place, keeping order."},
+  {id:26,  t:"Remove Duplicates from Sorted Array",   p:"two pointers", q:"Deduplicate a sorted array in place, returning the new length."},
+  {id:75,  t:"Sort Colors",                           p:"two pointers", q:"Sort an array of 0s, 1s and 2s in one pass, in place."}
+];
+
+const RUBRIC = [
+  {lv:0, d:"No approach recalled."},
+  {lv:1, d:"Recalls the general family of technique."},
+  {lv:2, d:"Recalls the correct approach and the governing invariant."},
+  {lv:3, d:"Recalls the approach, the invariant and the complexity, and can outline the implementation."}
+];
+
+/* =========================================================================
+   State
+   ====================================================================== */
+const KEY = "interval.v1";
+const DAY = 86400000;
+let S;
+
+const today   = () => { const d=new Date(); d.setHours(0,0,0,0); return d.getTime(); };
+const dayNum  = ms => Math.floor(ms/DAY);
+const daysBetween = (a,b) => dayNum(b)-dayNum(a);
+const iso     = ms => new Date(ms).toISOString().slice(0,10);
+const fmtDate = ms => new Date(ms).toLocaleDateString(undefined,{month:"short",day:"numeric"});
+
+function blank(){
+  return {
+    onboarded:false, sessionMinutes:20, targetDate:"", demo:false,
+    createdAt:today(), cards:{}, reflectionSeen:0
+  };
+}
+function load(){
+  try{ const raw=localStorage.getItem(KEY); S = raw ? JSON.parse(raw) : blank(); }
+  catch(e){ S = blank(); }
+  if(!S || typeof S!=="object") S = blank();
+}
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+
+function card(id){
+  if(!S.cards[id]) S.cards[id] = {ease:2.5, interval:0, reps:0, lapses:0, due:null, log:[]};
+  return S.cards[id];
+}
+const tracked = () => DECK.filter(p => S.cards[p.id] && S.cards[p.id].log.length);
+
+/* =========================================================================
+   SM-2 style scheduler.
+   Our four-level rubric (0..3) maps onto SM-2's quality scale, then the
+   standard ease update runs. Below level 2 the card lapses back to one day.
+   ====================================================================== */
+/* Level 2 is the pass mark: it is the first level at which the governing
+   invariant came back. Levels 0 and 1 therefore land below SM-2's q=3
+   threshold and lapse the card. */
+const QMAP = [0,2,4,5];
+
+function schedule(c, level, when){
+  const q = QMAP[level];
+  const before = c.interval;
+
+  // SM-2 updates the ease factor on every review, pass or lapse.
+  c.ease = Math.min(2.8, Math.max(1.3,
+    c.ease + (0.1 - (5-q)*(0.08 + (5-q)*0.02))));
+
+  if(q < 3){
+    c.reps = 0; c.lapses++; c.interval = 1;
+  }else{
+    c.reps++;
+    if(c.reps === 1)      c.interval = 1;
+    else if(c.reps === 2) c.interval = 6;
+    else                  c.interval = Math.max(1, Math.round(before * c.ease));
+  }
+  c.due = when + c.interval*DAY;
+  return {before, after:c.interval};
+}
+
+/* Modelled retention: 90% at the scheduled due date, decaying after. */
+function retention(c, now){
+  if(!c.log.length || !c.interval) return null;
+  const last = c.log[c.log.length-1].at;
+  const elapsed = Math.max(0, daysBetween(last, now));
+  return Math.max(0.02, Math.min(1, Math.pow(0.9, elapsed / c.interval)));
+}
+function retColor(r){
+  if(r === null) return "var(--r-low)";
+  if(r >= 0.75) return "var(--r-high)";
+  if(r >= 0.45) return "var(--r-mid)";
+  return "var(--r-low)";
+}
+
+/* Confidence calibration: a 4x4 matrix of predicted level against scored
+   level, plus the mean signed gap. A positive gap is overconfidence. */
+function calibration(){
+  const m = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+  let n = 0, sum = 0;
+  DECK.forEach(p => { const c = S.cards[p.id]; if(!c) return;
+    c.log.forEach(e => { if(typeof e.pred !== "number") return;
+      m[e.pred][e.score]++; n++; sum += e.pred - e.score; }); });
+  return {m, n, mean: n ? sum/n : null, max: Math.max(1, ...m.flat())};
+}
+
+function dueList(now){
+  return DECK
+    .filter(p => { const c=S.cards[p.id]; return c && c.due !== null && c.due <= now + DAY - 1; })
+    .sort((a,b) => (retention(S.cards[a.id],now) ?? 0) - (retention(S.cards[b.id],now) ?? 0));
+}
+function overdueCount(now){
+  return DECK.filter(p => { const c=S.cards[p.id]; return c && c.due !== null && daysBetween(c.due, now) > 0; }).length;
+}
+
+/* =========================================================================
+   Demo mode — seeds six weeks of simulated history so a first-time
+   visitor lands on a populated queue instead of an empty shell.
+   ====================================================================== */
+const SKETCHES = {
+  1:"hashmap value -> index, single pass\ncheck target-x before inserting x\nO(n) / O(n)",
+  217:"put into a set, compare sizes\nor sort and scan neighbours\nO(n) / O(n)",
+  242:"count chars in a 26-array, compare\nlengths must match first\nO(n) / O(1)",
+  49:"key = sorted letters (or count tuple)\nbucket into map of key -> list\nO(nk log k) / O(nk)",
+  347:"count with a map, then bucket sort by count\nbuckets index 0..n\nO(n) / O(n)",
+  238:"prefix pass then suffix pass\nkeep running product in the output array\nO(n) / O(1) extra",
+  36:"three sets per row / col / box\nbox key = (r/3)*3 + c/3\nO(1) / O(1)",
+  128:"set of all values\nstart a run only where x-1 is absent\nO(n) / O(n)",
+  146:"hashmap + doubly linked list\nmove-to-front on get, evict tail on overflow\nO(1) / O(capacity)",
+  560:"prefix sums in a map, count of sum-k seen\nseed map with {0:1}\nO(n) / O(n)",
+  219:"sliding window of size k held in a set\ndrop i-k-1 as the window moves\nO(n) / O(k)",
+  136:"xor everything, pairs cancel\nO(n) / O(1)",
+  53:"Kadane: best ending here = max(x, best+x)\nreset when the running sum goes negative\nO(n) / O(1)",
+  169:"Boyer-Moore: candidate + count\ncount hits zero -> swap candidate\nO(n) / O(1)",
+  448:"index as a hash: negate value at |x|-1\npositives left over mark the missing\nO(n) / O(1)",
+  41:"cyclic placement: put x at index x-1\nthen scan for the first mismatch\nO(n) / O(1)",
+  125:"two pointers inward, skip non-alphanumerics\ncompare lowercased\nO(n) / O(1)",
+  167:"left/right pointers, sum too small -> left++\ntoo big -> right--\nO(n) / O(1)",
+  15:"sort, fix i, two-pointer the rest\nskip duplicates at every level\nO(n^2) / O(1)",
+  11:"widest first, move the shorter side inward\nthe shorter wall caps the area\nO(n) / O(1)",
+  42:"two pointers, track leftMax/rightMax\nwater at i = min(maxes) - height\nO(n) / O(1)",
+  283:"slow pointer marks the write position\nswap non-zeroes forward\nO(n) / O(1)",
+  26:"slow/fast; write when a[fast] != a[slow]\nO(n) / O(1)",
+  75:"Dutch national flag, three pointers low/mid/high\ninvariant: <low is 0, >high is 2\nO(n) / O(1)"
+};
+
+/* Each entry is [days until due, current interval, reviews so far, lapses].
+   Six problems sit in today's queue (three of them overdue), twelve come up
+   inside a fortnight, and six have earned long intervals. */
+const DEMO_PLAN = [
+  // badly neglected: short intervals, long since passed. These are the
+  // problems solved once and never revisited, and they decay hard.
+  [-31, 1,1,1], [-19, 3,2,1], [-9, 6,3,1],
+  // recently lapsed or just coming due
+  [ -4, 6,3,1], [  0,10,4,0], [  0,14,4,0],
+  // inside a fortnight
+  [ 1, 6,3,0], [ 2,10,4,1], [ 3, 6,3,0], [4,15,4,0], [5, 6,3,1], [6, 3,2,0],
+  [ 7,10,4,0], [ 8,21,5,0], [ 9, 6,3,1], [10,15,4,0], [11,6,3,0], [13,10,4,1],
+  // earned long intervals
+  [16,25,5,0], [18,21,5,0], [21,30,6,0], [24,25,5,0], [27,35,6,0], [30,30,6,0]
+];
+
+function seedDemo(){
+  S = blank();
+  S.onboarded = true; S.demo = true; S.sessionMinutes = 20;
+  const t = today();
+  S.createdAt = t - 42*DAY;
+  S.targetDate = iso(t + 38*DAY);
+
+  // deterministic, so the demo looks identical in every recording
+  let seed = 20261102;
+  const rnd = () => (seed = (seed*1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+
+  // deal the plan across the deck so patterns stay mixed in the queue, but pin
+  // LRU Cache to the most-neglected slot: it is the worked example behind this
+  // whole project, solved once and then failed a month later.
+  const order = DECK.map((p,i) => i).sort((a,b) => ((a*7919)%24) - ((b*7919)%24));
+  const lru = DECK.findIndex(p => p.id === 146);
+  order.splice(order.indexOf(lru), 1);
+  order.unshift(lru);
+
+  order.forEach((deckIdx, planIdx) => {
+    const p = DECK[deckIdx];
+    const [dueIn, interval, reps, lapses] = DEMO_PLAN[planIdx];
+    const c = card(p.id);
+
+    c.interval = interval;
+    c.reps     = reps;
+    c.lapses   = lapses;
+    c.ease     = Math.round((2.3 + rnd()*0.45) * 100) / 100;
+    c.due      = t + dueIn*DAY;
+
+    // back-fill a plausible review history ending at due - interval
+    const stops = [];
+    let at = c.due - interval*DAY, step = interval;
+    for(let k=0; k<reps; k++){
+      stops.unshift(at);
+      step = k === reps-2 ? 6 : Math.max(1, Math.round(step / c.ease));
+      at -= step*DAY;
+    }
+    stops.forEach((when, k) => {
+      const lastOne = k === stops.length-1;
+      // early reviews are shakier; the most recent one passed, or it would not
+      // be sitting on a long interval
+      const score = lastOne ? (interval >= 15 ? 3 : 2)
+                            : (() => { const r=rnd(); return r<0.08?0 : r<0.26?1 : r<0.66?2 : 3; })();
+      // learners are systematically overconfident, so predictions run high
+      const pred = Math.min(3, score + (rnd() < 0.52 ? 1 : 0));
+      c.log.push({at:when, pred, score, sketch:SKETCHES[p.id] || ""});
+    });
+  });
+  save();
+}
+
+/* =========================================================================
+   Rendering
+   ====================================================================== */
+const app  = document.getElementById("app");
+const navEl= document.getElementById("nav");
+let view = "today";
+let session = null;   // {ids:[], i:0, stage:"recall"|"compare"|"done", pred:null, sketch:"", result:null}
+
+const esc = s => String(s).replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+
+function go(v){ view = v; session = null; render(); }
+
+function renderNav(){
+  if(!S.onboarded){ navEl.innerHTML=""; return; }
+  const items = [["today","Today"],["log","Log a solve"],["dash","Dashboard"],["reflect","This week"],["about","About"]];
+  navEl.innerHTML = items.map(([k,l]) =>
+    `<button data-go="${k}" ${view===k?'aria-current="page"':''}>${l}</button>`).join("");
+}
+
+function meterHTML(r){
+  const pct = r === null ? 0 : Math.round(r*100);
+  return `<div class="meter">
+    <div class="bar"><i style="width:${pct}%;background:${retColor(r)}"></i></div>
+    <div class="pct">${r===null?"—":pct+"%"}</div></div>`;
+}
+
+/* ---------- onboarding ---------- */
+let obStep = 0;
+function viewOnboard(){
+  const bars = [0,1,2].map(i=>`<i class="${i<=obStep?'on':''}"></i>`).join("");
+  const panes = [
+    `<h1>What this tool is for</h1>
+     <p class="lede">Interval does not run your code and does not tell you whether an answer is
+     correct. The platform you already practise on does that. This tool tracks one thing instead:
+     whether you can still reconstruct a solution weeks after you first solved it.</p>
+     <p class="lede">The measure of progress here is durable retrieval, not problems completed.</p>`,
+    `<h1>Review will feel harder than rereading</h1>
+     <p class="lede">Every review starts by hiding your own notes and asking you to rebuild the
+     method from memory. That is slower and less pleasant than reading your notes back, and it
+     feels like it is working less well. It is working better.</p>
+     <p class="lede">Expect to be wrong about what you know. The dashboard tracks the gap between
+     how confident you felt and how much you actually recalled.</p>`,
+    `<h1>Set your session shape</h1>
+     <div class="field" style="margin-top:18px">
+       <label for="ob-min">Minutes you can commit to on a normal day</label>
+       <input id="ob-min" type="number" min="5" max="120" step="5" value="${S.sessionMinutes}">
+     </div>
+     <div class="field">
+       <label for="ob-date">Target date you are preparing for (optional)</label>
+       <input id="ob-date" type="date" value="${esc(S.targetDate)}">
+     </div>`
+  ];
+  app.innerHTML = `<div class="narrow">
+    <div class="steps">${bars}</div>
+    ${panes[obStep]}
+    <div class="rowbtns">
+      ${obStep>0?'<button class="btn ghost" data-ob="-1">Back</button>':''}
+      <button class="btn key" data-ob="1">${obStep<2?"Continue":"Start the diagnostic"}</button>
+      ${obStep===0?'<button class="btn ghost" data-demo="1">Load the demo instead</button>':''}
+    </div>
+    <p class="foot">Nothing you enter leaves this browser. There are no accounts and no server.</p>
+  </div>`;
+}
+
+/* ---------- diagnostic ---------- */
+let diag = null;
+function viewDiagnostic(){
+  if(!diag) diag = {ids:[1,125,238,146], i:0};
+  if(diag.i >= diag.ids.length){
+    S.onboarded = true; save(); diag = null; go("today"); return;
+  }
+  const p = DECK.find(x=>x.id===diag.ids[diag.i]);
+  app.innerHTML = `<div class="narrow">
+    <div class="h-sec">Diagnostic ${diag.i+1} of ${diag.ids.length}</div>
+    <h1>${p.id}. ${esc(p.t)}</h1>
+    <p class="lede" style="margin-top:10px">${esc(p.q)}</p>
+    <p class="lede">Attempted cold, with nothing to look at. This is not scored — it only sets
+    where each problem enters the schedule.</p>
+    <div class="field" style="margin-top:22px">
+      <label for="dg">Sketch the approach as far as you can get</label>
+      <textarea id="dg" placeholder="core insight&#10;invariant&#10;time / space"></textarea>
+    </div>
+    <label>How much of the method did you recover?</label>
+    <div class="scale" id="dg-scale">
+      ${RUBRIC.map(r=>`<button data-lv="${r.lv}" aria-pressed="false">
+        <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span></button>`).join("")}
+    </div>
+    <div class="rowbtns"><button class="btn key" id="dg-next" disabled>Record and continue</button></div>
+  </div>`;
+}
+
+/* ---------- today ---------- */
+function viewToday(){
+  const now = today();
+  const due = dueList(now);
+  const od  = overdueCount(now);
+  const trackedN = tracked().length;
+  const g = calibration();
+
+  app.innerHTML = `<div class="wide">
+    <div class="readings">
+      <div class="reading"><div class="v">${due.length}</div><div class="k">due today</div></div>
+      <div class="reading ${od?'lamp':'quiet'}"><div class="v">${od}</div><div class="k">overdue</div></div>
+      <div class="reading ${g.mean!==null&&g.mean>0.15?'lamp':'quiet'}">
+        <div class="v">${g.mean===null?'—':(g.mean>0?'+':'')+g.mean.toFixed(2)}</div>
+        <div class="k">${g.mean===null?'no predictions logged yet'
+          :'levels you overestimate yourself by, on average'}</div></div>
+      <div class="reading quiet"><div class="v">${trackedN}/${DECK.length}</div><div class="k">deck in rotation</div></div>
+    </div>
+
+    ${due.length ? `
+      <div class="h-sec">Review queue, weakest first</div>
+      <div class="queue">${due.map(p=>{
+        const c = S.cards[p.id], r = retention(c,now);
+        const late = daysBetween(c.due, now);
+        const last = c.log.length ? daysBetween(c.log[c.log.length-1].at, now) : null;
+        return `<div class="row ${late>0?'overdue':''}">
+          <div><div class="t"><span class="id">${p.id}</span><b>${esc(p.t)}</b></div>
+            <div class="meta"><span>${esc(p.p)}</span>
+              <span>last seen ${last} day${last===1?'':'s'} ago</span>
+              ${late>0?`<em>${late} day${late===1?'':'s'} overdue</em>`:''}</div></div>
+          ${meterHTML(r)}
+          <div class="rowact"><button class="btn sm" data-review="${p.id}">Review</button></div>
+        </div>`;}).join("")}</div>
+      <div class="rowbtns"><button class="btn key" id="start-session">Start the session (${due.length} due)</button></div>
+    ` : `
+      <div class="h-sec">Review queue</div>
+      <div class="empty">${trackedN
+        ? `Nothing is due today. The next problem comes up ${nextDueLabel(now)}.<br>
+           You can still log a problem you solved elsewhere.`
+        : `No problems in rotation yet. Log a problem you have solved, and it enters the schedule.`}
+      </div>
+      <div class="rowbtns"><button class="btn key" data-go="log">Log a solve</button></div>
+    `}
+
+    <div class="h-sec">Coming up</div>
+    ${upcomingHTML(now)}
+  </div>`;
+}
+function nextDueLabel(now){
+  const fut = DECK.map(p=>S.cards[p.id]).filter(c=>c&&c.due).map(c=>c.due).filter(d=>d>now);
+  if(!fut.length) return "once you log something";
+  const d = Math.min(...fut);
+  const n = daysBetween(now,d);
+  return n<=1 ? "tomorrow" : `in ${n} days (${fmtDate(d)})`;
+}
+function upcomingHTML(now){
+  const buckets = [0,0,0,0,0,0,0];
+  DECK.forEach(p=>{ const c=S.cards[p.id]; if(!c||!c.due) return;
+    const n = daysBetween(now, c.due); if(n>=1 && n<=7) buckets[n-1]++; });
+  if(!buckets.some(b=>b)) return `<p class="lede">Nothing scheduled in the next seven days.</p>`;
+  const max = Math.max(...buckets);
+  return `<table><thead><tr><th>Day</th><th>Date</th><th style="width:55%">Load</th><th class="n">Reviews</th></tr></thead><tbody>
+    ${buckets.map((b,i)=>{
+      const d = now + (i+1)*DAY;
+      return `<tr><td class="n">+${i+1}</td><td>${fmtDate(d)}</td>
+        <td><div class="bar" style="max-width:260px"><i style="width:${max?Math.round(b/max*100):0}%;background:var(--r-mid)"></i></div></td>
+        <td class="n">${b}</td></tr>`;}).join("")}
+  </tbody></table>`;
+}
+
+/* ---------- review (recall first) ---------- */
+function startSession(ids){
+  session = {ids, i:0, stage:"recall", pred:null, sketch:"", result:null};
+  view = "review"; render();
+}
+function viewReview(){
+  if(!session || session.i >= session.ids.length){
+    app.innerHTML = `<div class="narrow">
+      <h1>Session complete</h1>
+      <p class="lede" style="margin-top:12px">Every due problem has been rescheduled. The next
+      interval for each one is set from the level you recorded, not from the clock.</p>
+      <div class="rowbtns">
+        <button class="btn key" data-go="dash">See the dashboard</button>
+        <button class="btn" data-go="today">Back to today</button></div></div>`;
+    return;
+  }
+  const p = DECK.find(x=>x.id===session.ids[session.i]);
+  const c = card(p.id);
+  const prev = c.log.length ? c.log[c.log.length-1] : null;
+  const head = `<div class="h-sec">Review ${session.i+1} of ${session.ids.length}
+    &nbsp;<span class="pill">interval ${c.interval||0}d</span>
+    &nbsp;<span class="pill">ease ${c.ease.toFixed(2)}</span></div>
+    <h1>${p.id}. ${esc(p.t)}</h1>
+    <p class="lede" style="margin-top:10px">${esc(p.q)}</p>`;
+
+  if(session.stage === "recall"){
+    app.innerHTML = `<div class="narrow">${head}
+      <div class="field" style="margin-top:24px">
+        <label for="rv">Rebuild the method from memory. Your previous sketch stays hidden until you commit.</label>
+        <textarea id="rv" placeholder="core insight&#10;invariant&#10;time / space">${esc(session.sketch)}</textarea>
+      </div>
+      <label>Before you look: how much do you think you just recovered?</label>
+      <div class="scale" id="pred-scale">
+        ${RUBRIC.map(r=>`<button data-lv="${r.lv}" aria-pressed="${session.pred===r.lv}">
+          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span></button>`).join("")}
+      </div>
+      <div class="rowbtns">
+        <button class="btn key" id="reveal" ${session.pred===null?"disabled":""}>Reveal my last sketch</button>
+      </div>
+      <p class="foot">The prediction is locked once you reveal. The gap between it and your score
+      is what the calibration panel measures.</p></div>`;
+    return;
+  }
+
+  if(session.stage === "compare"){
+    app.innerHTML = `<div class="narrow">${head}
+      <div class="h-sec">What you just wrote</div>
+      <div class="sketch">${esc(session.sketch || "(left blank)")}</div>
+      <div class="h-sec reveal">Your sketch from ${prev?fmtDate(prev.at):"earlier"}</div>
+      <div class="sketch prior reveal">${esc(prev && prev.sketch ? prev.sketch : "(nothing recorded yet)")}</div>
+      <div class="h-sec">Score it against the rubric</div>
+      <div class="scale" id="score-scale">
+        ${RUBRIC.map(r=>`<button data-lv="${r.lv}" aria-pressed="false">
+          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span></button>`).join("")}
+      </div>
+      <div class="rowbtns"><button class="btn key" id="commit" disabled>Score and schedule</button></div>
+      <p class="foot">You predicted level ${session.pred}.</p></div>`;
+    return;
+  }
+
+  // scheduled
+  const res = session.result;
+  app.innerHTML = `<div class="narrow">${head}
+    <div class="h-sec">Next interval</div>
+    <div class="verdict reveal">
+      ${res.before?`<span class="was">${res.before}d</span>`:""}
+      <span class="now">${res.after}d</span>
+      <span class="u">next due ${fmtDate(c.due)}</span>
+    </div>
+    <p class="lede" style="margin-top:18px">
+      Scored ${res.level} against a prediction of ${res.pred}.
+      ${res.level < res.pred ? "You were more confident than the recall justified, which is the gap the dashboard tracks."
+        : res.level > res.pred ? "You recalled more than you expected."
+        : "Prediction and recall agreed."}
+      Ease factor is now ${c.ease.toFixed(2)}.
+    </p>
+    <div class="rowbtns">
+      <button class="btn key" id="next-card">${session.i+1 < session.ids.length ? "Next problem" : "Finish session"}</button>
+    </div></div>`;
+}
+
+/* ---------- log a solve ---------- */
+function viewLog(){
+  const untracked = DECK.filter(p => !S.cards[p.id] || !S.cards[p.id].log.length);
+  const list = untracked.length ? untracked : DECK;
+  app.innerHTML = `<div class="narrow">
+    <h1>Log a problem you solved</h1>
+    <p class="lede" style="margin-top:10px">Solve it wherever you normally do. Logging it here is
+    what puts it on a schedule — write the sketch while the solution is still fresh, because that
+    sketch is what you will be asked to reconstruct later.</p>
+    <div class="field" style="margin-top:24px">
+      <label for="lg-p">Problem</label>
+      <select id="lg-p" style="width:100%;background:#0e1217;border:1px solid var(--rule);border-radius:3px;padding:9px 10px">
+        ${list.map(p=>`<option value="${p.id}">${p.id}. ${esc(p.t)} (${esc(p.p)})</option>`).join("")}
+      </select>
+    </div>
+    <div class="field">
+      <label for="lg-s">Approach sketch: core insight, the invariant, time and space</label>
+      <textarea id="lg-s" placeholder="core insight&#10;invariant&#10;time / space"></textarea>
+    </div>
+    <label>How solid did it feel by the end?</label>
+    <div class="scale" id="lg-scale">
+      ${RUBRIC.map(r=>`<button data-lv="${r.lv}" aria-pressed="false">
+        <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span></button>`).join("")}
+    </div>
+    <div class="rowbtns"><button class="btn key" id="lg-save" disabled>Save and schedule</button></div>
+  </div>`;
+}
+
+/* ---------- dashboard ---------- */
+function viewDash(){
+  const now = today();
+  const rows = tracked().map(p=>{
+    const c=S.cards[p.id];
+    return {p, c, r:retention(c,now),
+      last: daysBetween(c.log[c.log.length-1].at, now),
+      due: c.due ? daysBetween(now, c.due) : null};
+  }).sort((a,b)=>(a.r??1)-(b.r??1));
+
+  const {m, n, mean:meanGap, max:mMax} = calibration();
+
+  app.innerHTML = `<div class="wide">
+    <h1>Dashboard</h1>
+    <p class="lede" style="margin-top:10px">Two numbers only, and both of them are yours alone:
+    how much you are modelled to retain, and how wrong your sense of that has been. There is
+    nothing here comparing you to anyone else.</p>
+
+    <div class="h-sec">Calibration: predicted level against scored level</div>
+    ${n ? `
+      <div class="cal">
+        <div class="ax"></div>${[0,1,2,3].map(c=>`<div class="ax">scored ${c}</div>`).join("")}
+        ${[0,1,2,3].map(r=>`
+          <div class="ax">said ${r}</div>
+          ${[0,1,2,3].map(c=>{
+            const v=m[r][c], a=v?0.12+0.88*(v/mMax):0;
+            return `<div class="cell ${r===c?'diag':''}"
+              style="background:${v?`rgba(79,209,197,${a.toFixed(2)})`:'#0e1217'};
+                     color:${v&&a>0.55?'#07201e':'var(--text)'}">${v||""}</div>`;}).join("")}
+        `).join("")}
+      </div>
+      <p class="axis-note">Cells on the outlined diagonal are calibrated. Everything to the left of
+      it is overconfidence: you predicted a higher level than you scored. Mean gap across
+      ${n} review${n===1?'':'s'} is <span class="num">${meanGap>0?"+":""}${meanGap.toFixed(2)}</span>
+      level${Math.abs(meanGap)===1?'':'s'}${meanGap>0.15?", which is the stability bias working exactly as the literature predicts":""}.</p>
+    ` : `<div class="empty">No predictions recorded yet. Complete a review and this fills in.</div>`}
+
+    <div class="h-sec">Per-problem retention, most decayed first</div>
+    ${rows.length ? `<table><thead><tr>
+        <th>Problem</th><th>Pattern</th><th style="width:170px">Modelled retention</th>
+        <th class="n">Interval</th><th class="n">Reviews</th><th class="n">Lapses</th><th>Due</th>
+      </tr></thead><tbody>
+      ${rows.map(({p,c,r,due})=>`<tr>
+        <td><span class="num" style="color:var(--text-faint)">${p.id}</span> ${esc(p.t)}</td>
+        <td style="color:var(--text-dim)">${esc(p.p)}</td>
+        <td>${meterHTML(r)}</td>
+        <td class="n">${c.interval}d</td>
+        <td class="n">${c.log.length}</td>
+        <td class="n" style="${c.lapses?'color:var(--lamp)':''}">${c.lapses}</td>
+        <td class="n" style="${due!==null&&due<0?'color:var(--lamp)':''}">${due===null?"—":due<0?`${-due}d late`:due===0?"today":`+${due}d`}</td>
+      </tr>`).join("")}
+    </tbody></table>` : `<div class="empty">Nothing in rotation yet.</div>`}
+  </div>`;
+}
+
+/* ---------- weekly reflection ---------- */
+function viewReflect(){
+  const now = today();
+  const rows = tracked().map(p=>{
+    const c=S.cards[p.id];
+    const preds = c.log.filter(e=>typeof e.pred==="number");
+    const g = preds.length ? preds.reduce((a,e)=>a+(e.pred-e.score),0)/preds.length : 0;
+    return {p,c,r:retention(c,now),gap:g};
+  });
+  const decayed = rows.filter(x=>x.r!==null).sort((a,b)=>a.r-b.r).slice(0,3);
+  const diverged = rows.slice().sort((a,b)=>b.gap-a.gap).slice(0,3).filter(x=>x.gap>0);
+  let load=0; DECK.forEach(p=>{const c=S.cards[p.id]; if(!c||!c.due) return;
+    const n=daysBetween(now,c.due); if(n>=0&&n<=7) load++;});
+
+  app.innerHTML = `<div class="narrow">
+    <h1>This week</h1>
+    <p class="lede" style="margin-top:10px">Built from your own data. The point of reading it is to
+    decide what to do next week, not to score the week you just had.</p>
+
+    <div class="h-sec">What has decayed most</div>
+    ${decayed.length ? `<table><tbody>${decayed.map(x=>`<tr>
+      <td>${esc(x.p.t)}</td><td style="width:150px">${meterHTML(x.r)}</td>
+      <td class="n" style="text-align:right">${x.c.interval}d interval</td></tr>`).join("")}</tbody></table>`
+      : `<div class="empty">Not enough history yet.</div>`}
+
+    <div class="h-sec">Where your confidence ran ahead of your recall</div>
+    ${diverged.length ? `<table><tbody>${diverged.map(x=>`<tr>
+      <td>${esc(x.p.t)}</td>
+      <td class="n" style="text-align:right;color:var(--lamp)">+${x.gap.toFixed(2)} levels</td></tr>`).join("")}</tbody></table>`
+      : `<div class="empty">Nothing is systematically overestimated right now.</div>`}
+
+    <div class="h-sec">Load for the next seven days</div>
+    <div class="readings"><div class="reading">
+      <div class="v">${load}</div><div class="k">reviews scheduled, about
+      ${Math.max(1,Math.round(load*2.5))} minutes a day at your current pace</div></div></div>
+    ${S.targetDate ? `<p class="lede" style="margin-top:20px">Target date is ${fmtDate(new Date(S.targetDate).getTime()+DAY/2)},
+      ${Math.max(0,daysBetween(now,new Date(S.targetDate).getTime()))} days out.</p>`:""}
+  </div>`;
+}
+
+/* ---------- about ---------- */
+function viewAbout(){
+  app.innerHTML = `<div class="narrow">
+    <h1>About this prototype</h1>
+    <p class="lede" style="margin-top:12px">Interval is a learner-centered management tool for
+    people preparing for technical interviews on their own. Practice platforms record everything
+    you do and schedule nothing; this schedules what you have already recorded.</p>
+
+    <div class="h-sec">How scheduling works</div>
+    <p class="lede">Each review ends with a four-level rubric score. That score maps onto an SM-2
+    quality value and drives the standard ease update, so the interval after a confident recall
+    grows by the ease factor while anything below level 2 lapses the card back to a single day.
+    Modelled retention assumes 90% recall at the scheduled due date and decays from the last
+    review.</p>
+
+    <div class="h-sec">What is deliberately absent</div>
+    <p class="lede">No streaks, no leaderboards, no public counters, no comparison to other users.
+    Every number on the dashboard is intrapersonal.</p>
+
+    <div class="h-sec">Your data</div>
+    <p class="lede">Everything lives in this browser's local storage. No accounts, no server, no
+    third-party services. Clearing site data clears your history.</p>
+    <div class="rowbtns">
+      <button class="btn" data-demo="1">Reload the six-week demo</button>
+      <button class="btn ghost" id="wipe">Erase everything and start over</button>
+    </div>
+    <p class="foot">Prototype for CS6460, Educational Technology. Deck of ${DECK.length} problems
+    across arrays, hashing and two pointers.</p>
+  </div>`;
+}
+
+/* =========================================================================
+   Router + events
+   ====================================================================== */
+function render(){
+  if(!S.onboarded && !diag) { renderNav(); viewOnboard(); return; }
+  if(diag){ renderNav(); viewDiagnostic(); return; }
+  renderNav();
+  ({today:viewToday, review:viewReview, log:viewLog,
+    dash:viewDash, reflect:viewReflect, about:viewAbout}[view] || viewToday)();
+  window.scrollTo(0,0);
+}
+
+function pickScale(wrap, btn, onPick){
+  wrap.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed","false"));
+  btn.setAttribute("aria-pressed","true");
+  onPick(Number(btn.dataset.lv));
+}
+
+document.addEventListener("click", e => {
+  const t = e.target.closest("button");
+  if(!t) return;
+
+  if(t.dataset.go){ go(t.dataset.go); return; }
+
+  if(t.dataset.demo){ seedDemo(); view="today"; diag=null; render(); return; }
+
+  if(t.id === "wipe"){
+    S = blank(); save(); obStep = 0; diag = null; view = "today"; render(); return;
+  }
+
+  if(t.dataset.ob){
+    if(obStep === 2 && t.dataset.ob === "1"){
+      const m = document.getElementById("ob-min"), d = document.getElementById("ob-date");
+      S.sessionMinutes = Math.max(5, Number(m.value)||20);
+      S.targetDate = d.value || "";
+      save(); diag = {ids:[1,125,238,146], i:0}; render(); return;
+    }
+    obStep = Math.max(0, Math.min(2, obStep + Number(t.dataset.ob)));
+    viewOnboard(); return;
+  }
+
+  // diagnostic scale
+  const dgs = t.closest("#dg-scale");
+  if(dgs){ pickScale(dgs, t, lv => { dgs.dataset.lv = lv;
+    document.getElementById("dg-next").disabled = false; }); return; }
+  if(t.id === "dg-next"){
+    const p = DECK[0] && DECK.find(x=>x.id===diag.ids[diag.i]);
+    const lv = Number(document.getElementById("dg-scale").dataset.lv);
+    const c = card(p.id);
+    c.log.push({at:today(), pred:null, score:lv, sketch:document.getElementById("dg").value.trim()});
+    schedule(c, lv, today());
+    save(); diag.i++; render(); return;
+  }
+
+  if(t.dataset.review){ startSession([Number(t.dataset.review)]); return; }
+  if(t.id === "start-session"){ startSession(dueList(today()).map(p=>p.id)); return; }
+
+  // review: prediction
+  const ps = t.closest("#pred-scale");
+  if(ps){ pickScale(ps, t, lv => { session.pred = lv;
+    document.getElementById("reveal").disabled = false; }); return; }
+  if(t.id === "reveal"){
+    session.sketch = document.getElementById("rv").value.trim();
+    session.stage = "compare"; viewReview(); return;
+  }
+
+  // review: score
+  const ss = t.closest("#score-scale");
+  if(ss){ pickScale(ss, t, lv => { ss.dataset.lv = lv;
+    document.getElementById("commit").disabled = false; }); return; }
+  if(t.id === "commit"){
+    const lv = Number(document.getElementById("score-scale").dataset.lv);
+    const p = DECK.find(x=>x.id===session.ids[session.i]);
+    const c = card(p.id);
+    const res = schedule(c, lv, today());
+    c.log.push({at:today(), pred:session.pred, score:lv, sketch:session.sketch});
+    session.result = {...res, level:lv, pred:session.pred};
+    session.stage = "done"; save(); viewReview(); return;
+  }
+  if(t.id === "next-card"){
+    session.i++; session.stage = "recall"; session.pred = null;
+    session.sketch = ""; session.result = null; viewReview(); return;
+  }
+
+  // log a solve
+  const ls = t.closest("#lg-scale");
+  if(ls){ pickScale(ls, t, lv => { ls.dataset.lv = lv;
+    document.getElementById("lg-save").disabled = false; }); return; }
+  if(t.id === "lg-save"){
+    const id = Number(document.getElementById("lg-p").value);
+    const lv = Number(document.getElementById("lg-scale").dataset.lv);
+    const c = card(id);
+    c.log.push({at:today(), pred:null, score:lv, sketch:document.getElementById("lg-s").value.trim()});
+    schedule(c, lv, today());
+    save(); go("today"); return;
+  }
+});
+
+load();
+render();
+</script>
+</body>
+</html>

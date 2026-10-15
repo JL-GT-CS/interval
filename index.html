@@ -7,8 +7,9 @@
 <style>
 :root{
   --ground:#12161d; --panel:#1a1f28; --panel-2:#212833; --rule:#2c3542; --rule-soft:#232a35;
-  --text:#e4e8ee; --text-dim:#8e9aab; --text-faint:#64707f;
-  --r-high:#4fd1c5; --r-mid:#3e8e8a; --r-low:#46555f;
+  /* every foreground below clears 4.5:1 against every surface above */
+  --text:#e4e8ee; --text-dim:#8e9aab; --text-faint:#8793a4;
+  --r-high:#4fd1c5; --r-mid:#4aa79f; --r-low:#46555f;
   --lamp:#e3b341; --lamp-dim:#8a6f2c;
   --focus:#7fd8ff;
   --sans:ui-sans-serif,-apple-system,"Segoe UI Variable Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif;
@@ -145,6 +146,31 @@ td.n{font-family:var(--mono); font-variant-numeric:tabular-nums}
 .rowbtns{display:flex; gap:10px; margin-top:22px; flex-wrap:wrap}
 .foot{margin-top:46px; padding-top:18px; border-top:1px solid var(--rule-soft); font-size:13px; color:var(--text-faint)}
 .pill{font-family:var(--mono); font-size:12px; color:var(--text-dim); border:1px solid var(--rule); border-radius:2px; padding:1px 6px}
+.kbd{font-family:var(--mono); font-size:11px; color:var(--text-faint); border:1px solid var(--rule);
+  border-radius:2px; padding:0 4px; margin-left:auto; align-self:center}
+
+/* skip link */
+.skip{position:absolute; left:-9999px; top:0; background:var(--panel-2); color:var(--text);
+  border:1px solid var(--focus); border-radius:3px; padding:9px 14px; z-index:50}
+.skip:focus{left:12px; top:10px}
+
+/* retention check */
+.clock{display:flex; align-items:baseline; gap:12px; margin-bottom:4px}
+.clock .t{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:34px;
+  letter-spacing:-.02em; line-height:1}
+.clock.low .t{color:var(--lamp)}
+.clock .k{font-size:13px; color:var(--text-dim)}
+.dots{display:flex; gap:5px; margin:14px 0 26px}
+.dots i{height:3px; flex:1; background:var(--rule); border-radius:1px}
+.dots i.done{background:var(--r-mid)}
+.dots i.now{background:var(--text)}
+.split{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:6px}
+.split .box{background:var(--panel); border:1px solid var(--rule); border-radius:4px; padding:16px}
+.split .box .v{font-family:var(--mono); font-size:32px; line-height:1; letter-spacing:-.02em}
+.split .box .k{font-size:13px; color:var(--text-dim); margin-top:8px}
+.tag{font-size:12px; color:var(--text-faint); border:1px solid var(--rule); border-radius:2px;
+  padding:1px 6px; margin-left:8px; vertical-align:2px}
+@media (max-width:700px){ .split{grid-template-columns:1fr} }
 
 @media (max-width:700px){
   main{padding:24px 16px 70px}
@@ -161,12 +187,14 @@ td.n{font-family:var(--mono); font-variant-numeric:tabular-nums}
 </head>
 <body>
 
+<a class="skip" href="#app">Skip to main content</a>
+
 <header class="topbar">
   <div class="brand">Interval<span>/</span>algorithms</div>
   <nav id="nav"></nav>
 </header>
 
-<main id="app"></main>
+<main id="app" tabindex="-1"></main>
 
 <script>
 "use strict";
@@ -201,6 +229,23 @@ const DECK = [
   {id:75,  t:"Sort Colors",                           p:"two pointers", q:"Sort an array of 0s, 1s and 2s in one pass, in place."}
 ];
 
+/* Reserve pool. These never enter the schedule, so they are genuinely unseen
+   when the delayed retention check draws from them. Each one uses a pattern the
+   deck already covers, which is what makes it a transfer item rather than a new
+   topic: scoring well here means the pattern survived, not just the solution. */
+const TRANSFER = [
+  {id:977, t:"Squares of a Sorted Array",  p:"two pointers", q:"Return the squares of a sorted array, sorted, in O(n)."},
+  {id:349, t:"Intersection of Two Arrays", p:"hashing",      q:"Return the unique values present in both arrays."},
+  {id:724, t:"Find Pivot Index",           p:"arrays",       q:"Find the index where the left sum equals the right sum."},
+  {id:643, t:"Maximum Average Subarray I", p:"two pointers", q:"Highest average of any contiguous subarray of length k."}
+];
+const ALL = () => DECK.concat(TRANSFER);
+const byId = id => ALL().find(p => p.id === id);
+
+/* Time budgets, in minutes. */
+const MIN_PER_REVIEW = 3;
+const CHECK_MINUTES  = 18;
+
 const RUBRIC = [
   {lv:0, d:"No approach recalled."},
   {lv:1, d:"Recalls the general family of technique."},
@@ -224,13 +269,14 @@ const fmtDate = ms => new Date(ms).toLocaleDateString(undefined,{month:"short",d
 function blank(){
   return {
     onboarded:false, sessionMinutes:20, targetDate:"", demo:false,
-    createdAt:today(), cards:{}, reflectionSeen:0
+    createdAt:today(), cards:{}, reflectionSeen:0, checks:[]
   };
 }
 function load(){
   try{ const raw=localStorage.getItem(KEY); S = raw ? JSON.parse(raw) : blank(); }
   catch(e){ S = blank(); }
   if(!S || typeof S!=="object") S = blank();
+  if(!Array.isArray(S.checks)) S.checks = [];   // state written by an earlier build
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
 
@@ -304,6 +350,31 @@ function overdueCount(now){
   return DECK.filter(p => { const c=S.cards[p.id]; return c && c.due !== null && daysBetween(c.due, now) > 0; }).length;
 }
 
+/* The learner commits to a session length during onboarding. Honour it: take
+   only what fits, weakest first, and say plainly what is being held back.
+   A queue that ignores the stated budget just moves the planning burden back
+   onto the learner, which is the thing this tool exists to remove. */
+function sessionBudget(now){
+  const due = dueList(now);
+  const fits = Math.max(1, Math.floor(S.sessionMinutes / MIN_PER_REVIEW));
+  return {due, take: due.slice(0, fits), deferred: Math.max(0, due.length - fits), fits};
+}
+
+/* Six problems: four already studied, two drawn from the reserve pool. */
+function buildCheckItems(){
+  const studied = DECK.filter(p => { const c=S.cards[p.id]; return c && c.log.length; });
+  let seed = dayNum(today());
+  const rnd = () => (seed = (seed*1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const pick = (arr, n) => {
+    const a = arr.slice();
+    for(let i=a.length-1; i>0; i--){ const j=Math.floor(rnd()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+    return a.slice(0, n);
+  };
+  return pick(studied, 4).map(p => ({id:p.id, unseen:false, answer:"", score:null}))
+    .concat(pick(TRANSFER, 2).map(p => ({id:p.id, unseen:true, answer:"", score:null})));
+}
+const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+
 /* =========================================================================
    Demo mode — seeds six weeks of simulated history so a first-time
    visitor lands on a populated queue instead of an empty shell.
@@ -353,7 +424,10 @@ const DEMO_PLAN = [
 
 function seedDemo(){
   S = blank();
-  S.onboarded = true; S.demo = true; S.sessionMinutes = 20;
+  S.onboarded = true; S.demo = true;
+  // a plausible weeknight commitment, and short enough that the budget visibly
+  // bites: 12 minutes is four reviews, so two of the six due are held back
+  S.sessionMinutes = 12;
   const t = today();
   S.createdAt = t - 42*DAY;
   S.targetDate = iso(t + 38*DAY);
@@ -417,7 +491,8 @@ function go(v){ view = v; session = null; render(); }
 
 function renderNav(){
   if(!S.onboarded){ navEl.innerHTML=""; return; }
-  const items = [["today","Today"],["log","Log a solve"],["dash","Dashboard"],["reflect","This week"],["about","About"]];
+  const items = [["today","Today"],["log","Log a solve"],["dash","Dashboard"],
+                 ["reflect","This week"],["check","Retention check"],["about","About"]];
   navEl.innerHTML = items.map(([k,l]) =>
     `<button data-go="${k}" ${view===k?'aria-current="page"':''}>${l}</button>`).join("");
 }
@@ -434,18 +509,18 @@ let obStep = 0;
 function viewOnboard(){
   const bars = [0,1,2].map(i=>`<i class="${i<=obStep?'on':''}"></i>`).join("");
   const panes = [
-    `<h1>What this tool is for</h1>
+    `<h1 tabindex="-1">What this tool is for</h1>
      <p class="lede">Interval does not run your code and does not tell you whether an answer is
      correct. The platform you already practise on does that. This tool tracks one thing instead:
      whether you can still reconstruct a solution weeks after you first solved it.</p>
      <p class="lede">The measure of progress here is durable retrieval, not problems completed.</p>`,
-    `<h1>Review will feel harder than rereading</h1>
+    `<h1 tabindex="-1">Review will feel harder than rereading</h1>
      <p class="lede">Every review starts by hiding your own notes and asking you to rebuild the
      method from memory. That is slower and less pleasant than reading your notes back, and it
      feels like it is working less well. It is working better.</p>
      <p class="lede">Expect to be wrong about what you know. The dashboard tracks the gap between
      how confident you felt and how much you actually recalled.</p>`,
-    `<h1>Set your session shape</h1>
+    `<h1 tabindex="-1">Set your session shape</h1>
      <div class="field" style="margin-top:18px">
        <label for="ob-min">Minutes you can commit to on a normal day</label>
        <input id="ob-min" type="number" min="5" max="120" step="5" value="${S.sessionMinutes}">
@@ -477,7 +552,7 @@ function viewDiagnostic(){
   const p = DECK.find(x=>x.id===diag.ids[diag.i]);
   app.innerHTML = `<div class="narrow">
     <div class="h-sec">Diagnostic ${diag.i+1} of ${diag.ids.length}</div>
-    <h1>${p.id}. ${esc(p.t)}</h1>
+    <h1 tabindex="-1">${p.id}. ${esc(p.t)}</h1>
     <p class="lede" style="margin-top:10px">${esc(p.q)}</p>
     <p class="lede">Attempted cold, with nothing to look at. This is not scored — it only sets
     where each problem enters the schedule.</p>
@@ -501,6 +576,7 @@ function viewToday(){
   const od  = overdueCount(now);
   const trackedN = tracked().length;
   const g = calibration();
+  const b = sessionBudget(now);
 
   app.innerHTML = `<div class="wide">
     <div class="readings">
@@ -514,8 +590,10 @@ function viewToday(){
     </div>
 
     ${due.length ? `
-      <div class="h-sec">Review queue, weakest first</div>
-      <div class="queue">${due.map(p=>{
+      <div class="h-sec">Today's session, weakest first${b.deferred
+        ? ` &nbsp;&nbsp;<span class="pill">${b.take.length} of ${due.length} fit your ${S.sessionMinutes} minutes</span>`
+        : ``}</div>
+      <div class="queue">${b.take.map(p=>{
         const c = S.cards[p.id], r = retention(c,now);
         const late = daysBetween(c.due, now);
         const last = c.log.length ? daysBetween(c.log[c.log.length-1].at, now) : null;
@@ -527,7 +605,12 @@ function viewToday(){
           ${meterHTML(r)}
           <div class="rowact"><button class="btn sm" data-review="${p.id}">Review</button></div>
         </div>`;}).join("")}</div>
-      <div class="rowbtns"><button class="btn key" id="start-session">Start the session (${due.length} due)</button></div>
+      ${b.deferred ? `<p class="lede" style="margin-top:16px;font-size:14px">The other
+        ${b.deferred} stay queued for tomorrow. You committed to ${S.sessionMinutes} minutes, and
+        at roughly ${MIN_PER_REVIEW} minutes a review that is ${b.fits}. You can change the number
+        under About.</p>` : ``}
+      <div class="rowbtns"><button class="btn key" id="start-session">Start the session (${b.take.length} ${
+        b.deferred ? `of ${b.due.length}` : `due`})</button></div>
     ` : `
       <div class="h-sec">Review queue</div>
       <div class="empty">${trackedN
@@ -572,7 +655,7 @@ function startSession(ids){
 function viewReview(){
   if(!session || session.i >= session.ids.length){
     app.innerHTML = `<div class="narrow">
-      <h1>Session complete</h1>
+      <h1 tabindex="-1">Session complete</h1>
       <p class="lede" style="margin-top:12px">Every due problem has been rescheduled. The next
       interval for each one is set from the level you recorded, not from the clock.</p>
       <div class="rowbtns">
@@ -586,7 +669,7 @@ function viewReview(){
   const head = `<div class="h-sec">Review ${session.i+1} of ${session.ids.length}
     &nbsp;<span class="pill">interval ${c.interval||0}d</span>
     &nbsp;<span class="pill">ease ${c.ease.toFixed(2)}</span></div>
-    <h1>${p.id}. ${esc(p.t)}</h1>
+    <h1 tabindex="-1">${p.id}. ${esc(p.t)}</h1>
     <p class="lede" style="margin-top:10px">${esc(p.q)}</p>`;
 
   if(session.stage === "recall"){
@@ -598,7 +681,8 @@ function viewReview(){
       <label>Before you look: how much do you think you just recovered?</label>
       <div class="scale" id="pred-scale">
         ${RUBRIC.map(r=>`<button data-lv="${r.lv}" aria-pressed="${session.pred===r.lv}">
-          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span></button>`).join("")}
+          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span>
+          <span class="kbd">${r.lv}</span></button>`).join("")}
       </div>
       <div class="rowbtns">
         <button class="btn key" id="reveal" ${session.pred===null?"disabled":""}>Reveal my last sketch</button>
@@ -617,7 +701,8 @@ function viewReview(){
       <div class="h-sec">Score it against the rubric</div>
       <div class="scale" id="score-scale">
         ${RUBRIC.map(r=>`<button data-lv="${r.lv}" aria-pressed="false">
-          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span></button>`).join("")}
+          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span>
+          <span class="kbd">${r.lv}</span></button>`).join("")}
       </div>
       <div class="rowbtns"><button class="btn key" id="commit" disabled>Score and schedule</button></div>
       <p class="foot">You predicted level ${session.pred}.</p></div>`;
@@ -628,7 +713,7 @@ function viewReview(){
   const res = session.result;
   app.innerHTML = `<div class="narrow">${head}
     <div class="h-sec">Next interval</div>
-    <div class="verdict reveal">
+    <div class="verdict reveal" role="status" aria-live="polite">
       ${res.before?`<span class="was">${res.before}d</span>`:""}
       <span class="now">${res.after}d</span>
       <span class="u">next due ${fmtDate(c.due)}</span>
@@ -650,7 +735,7 @@ function viewLog(){
   const untracked = DECK.filter(p => !S.cards[p.id] || !S.cards[p.id].log.length);
   const list = untracked.length ? untracked : DECK;
   app.innerHTML = `<div class="narrow">
-    <h1>Log a problem you solved</h1>
+    <h1 tabindex="-1">Log a problem you solved</h1>
     <p class="lede" style="margin-top:10px">Solve it wherever you normally do. Logging it here is
     what puts it on a schedule — write the sketch while the solution is still fresh, because that
     sketch is what you will be asked to reconstruct later.</p>
@@ -686,7 +771,7 @@ function viewDash(){
   const {m, n, mean:meanGap, max:mMax} = calibration();
 
   app.innerHTML = `<div class="wide">
-    <h1>Dashboard</h1>
+    <h1 tabindex="-1">Dashboard</h1>
     <p class="lede" style="margin-top:10px">Two numbers only, and both of them are yours alone:
     how much you are modelled to retain, and how wrong your sense of that has been. There is
     nothing here comparing you to anyone else.</p>
@@ -728,6 +813,138 @@ function viewDash(){
   </div>`;
 }
 
+/* ---------- delayed retention check ----------
+   Deliberately walled off from the scheduler. Nothing scored here changes an
+   interval, because an instrument that feeds the thing it measures cannot be
+   used as evidence about it.                                              */
+let check = null;   // {stage, items, i, endsAt, scoreIdx}
+let checkTimer = null;
+
+function stopCheckTimer(){ if(checkTimer){ clearInterval(checkTimer); checkTimer = null; } }
+
+function viewCheck(){
+  const last = S.checks[S.checks.length-1];
+
+  if(!check){
+    const studied = DECK.filter(p => { const c=S.cards[p.id]; return c && c.log.length; }).length;
+    app.innerHTML = `<div class="narrow">
+      <h1 tabindex="-1">Delayed retention check</h1>
+      <p class="lede" style="margin-top:12px">A timed set of six problems, taken a week after a
+      practice period ends. Four you have studied, and two you have never seen that use the same
+      patterns. You get ${CHECK_MINUTES} minutes and no hints, and you score yourself afterwards
+      against the same rubric the reviews use.</p>
+      <p class="lede">Nothing you score here changes any interval. This is a measurement, and an
+      instrument that feeds the thing it is measuring cannot be used as evidence about it.</p>
+
+      <div class="h-sec">Why two unseen problems</div>
+      <p class="lede">A check made only of studied problems cannot tell retention of a pattern apart
+      from memory of a specific solution. The gap between your studied score and your unseen score
+      is the part worth looking at.</p>
+
+      ${last ? `<div class="h-sec">Your last check</div>
+        <p class="lede">${fmtDate(last.at)} — studied ${last.studied.toFixed(2)},
+        unseen ${last.unseen.toFixed(2)}, out of 3.</p>` : ""}
+
+      <div class="rowbtns">
+        <button class="btn key" id="ck-start" ${studied<4?"disabled":""}>Start the check
+          (${CHECK_MINUTES} minutes)</button>
+      </div>
+      ${studied<4 ? `<p class="foot">You need at least four problems in rotation before a check
+        means anything. You have ${studied}.</p>`
+        : `<p class="foot">Once you start, the clock runs and you cannot pause it.</p>`}
+    </div>`;
+    return;
+  }
+
+  const it = check.items[check.i];
+
+  if(check.stage === "run"){
+    const left = Math.max(0, Math.round((check.endsAt - Date.now())/1000));
+    const p = byId(it.id);
+    app.innerHTML = `<div class="narrow">
+      <div class="clock ${left<=120?'low':''}">
+        <div class="t" id="ck-clock">${String(Math.floor(left/60)).padStart(2,"0")}:${String(left%60).padStart(2,"0")}</div>
+        <div class="k">remaining, for all six</div>
+      </div>
+      <div class="dots">${check.items.map((_,k)=>
+        `<i class="${k<check.i?'done':k===check.i?'now':''}"></i>`).join("")}</div>
+
+      <h1 tabindex="-1">${p.id}. ${esc(p.t)}</h1>
+      <p class="lede" style="margin-top:10px">${esc(p.q)}</p>
+      <div class="field" style="margin-top:22px">
+        <label for="ck-a">Approach only. Core insight, the invariant, time and space.</label>
+        <textarea id="ck-a" placeholder="core insight&#10;invariant&#10;time / space">${esc(it.answer)}</textarea>
+      </div>
+      <div class="rowbtns">
+        <button class="btn key" id="ck-next">${check.i+1 < check.items.length
+          ? "Next problem" : "Finish and score"}</button>
+      </div>
+      <p class="foot">No rubric and no notes until all six are done.</p>
+    </div>`;
+    return;
+  }
+
+  if(check.stage === "score"){
+    const p = byId(check.items[check.scoreIdx].id);
+    const cur = check.items[check.scoreIdx];
+    app.innerHTML = `<div class="narrow">
+      <div class="h-sec">Scoring ${check.scoreIdx+1} of ${check.items.length}</div>
+      <h1 tabindex="-1">${p.id}. ${esc(p.t)}${cur.unseen?'<span class="tag">unseen</span>':''}</h1>
+      <p class="lede" style="margin-top:10px">${esc(p.q)}</p>
+      <div class="h-sec">What you wrote</div>
+      <div class="sketch">${esc(cur.answer || "(left blank)")}</div>
+      <div class="h-sec">Score it</div>
+      <div class="scale" id="ck-scale">
+        ${RUBRIC.map(r=>`<button data-lv="${r.lv}" aria-pressed="false">
+          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span>
+          <span class="kbd">${r.lv}</span></button>`).join("")}
+      </div>
+      <div class="rowbtns"><button class="btn key" id="ck-score-next" disabled>${
+        check.scoreIdx+1 < check.items.length ? "Next" : "See the result"}</button></div>
+    </div>`;
+    return;
+  }
+
+  // done
+  const res = S.checks[S.checks.length-1];
+  const gap = res.studied - res.unseen;
+  app.innerHTML = `<div class="narrow">
+    <h1 tabindex="-1">Check complete</h1>
+    <div class="split" style="margin-top:20px">
+      <div class="box"><div class="v" style="color:var(--r-high)">${res.studied.toFixed(2)}</div>
+        <div class="k">mean rubric level on the four studied problems</div></div>
+      <div class="box"><div class="v" style="color:${gap>=1?'var(--lamp)':'var(--r-high)'}">${res.unseen.toFixed(2)}</div>
+        <div class="k">mean on the two unseen problems</div></div>
+    </div>
+    <p class="lede" style="margin-top:22px">${
+      gap >= 1
+        ? `A gap of ${gap.toFixed(2)} levels. You are recalling these solutions more than you are
+           recalling the patterns behind them, which is the failure this check exists to catch.`
+        : gap <= -0.5
+        ? `You scored higher on the unseen problems. With a sample this small that is probably noise
+           rather than a finding.`
+        : `A gap of ${gap.toFixed(2)} levels. The patterns are travelling to problems you have never
+           seen, which is the point.`}</p>
+    <p class="lede">Took <span class="num">${Math.floor(res.seconds/60)}:${String(res.seconds%60).padStart(2,"0")}</span>
+    of the ${CHECK_MINUTES} minutes allowed. No interval changed.</p>
+    <div class="rowbtns">
+      <button class="btn key" data-go="today">Back to today</button>
+      <button class="btn" data-go="dash">Dashboard</button></div>
+  </div>`;
+}
+
+function finishCheck(){
+  const st = check.items.filter(x=>!x.unseen).map(x=>x.score||0);
+  const un = check.items.filter(x=> x.unseen).map(x=>x.score||0);
+  S.checks.push({
+    at: today(), seconds: check.seconds,
+    studied: mean(st), unseen: mean(un),
+    items: check.items.map(x=>({id:x.id, unseen:x.unseen, score:x.score}))
+  });
+  save();
+  check.stage = "done";
+}
+
 /* ---------- weekly reflection ---------- */
 function viewReflect(){
   const now = today();
@@ -743,7 +960,7 @@ function viewReflect(){
     const n=daysBetween(now,c.due); if(n>=0&&n<=7) load++;});
 
   app.innerHTML = `<div class="narrow">
-    <h1>This week</h1>
+    <h1 tabindex="-1">This week</h1>
     <p class="lede" style="margin-top:10px">Built from your own data. The point of reading it is to
     decide what to do next week, not to score the week you just had.</p>
 
@@ -771,7 +988,7 @@ function viewReflect(){
 /* ---------- about ---------- */
 function viewAbout(){
   app.innerHTML = `<div class="narrow">
-    <h1>About this prototype</h1>
+    <h1 tabindex="-1">About this prototype</h1>
     <p class="lede" style="margin-top:12px">Interval is a learner-centered management tool for
     people preparing for technical interviews on their own. Practice platforms record everything
     you do and schedule nothing; this schedules what you have already recorded.</p>
@@ -786,6 +1003,16 @@ function viewAbout(){
     <div class="h-sec">What is deliberately absent</div>
     <p class="lede">No streaks, no leaderboards, no public counters, no comparison to other users.
     Every number on the dashboard is intrapersonal.</p>
+
+    <div class="h-sec">Session length</div>
+    <p class="lede">Today's queue is cut to what fits. At about ${MIN_PER_REVIEW} minutes a review,
+    ${S.sessionMinutes} minutes is ${Math.max(1,Math.floor(S.sessionMinutes/MIN_PER_REVIEW))} problems;
+    anything beyond that waits for tomorrow rather than becoming a backlog you avoid opening.</p>
+    <div class="field" style="max-width:260px;margin-top:14px">
+      <label for="sm">Minutes a day</label>
+      <input id="sm" type="number" min="5" max="120" step="5" value="${S.sessionMinutes}">
+    </div>
+    <div class="rowbtns" style="margin-top:0"><button class="btn" id="sm-save">Save</button></div>
 
     <div class="h-sec">Your data</div>
     <p class="lede">Everything lives in this browser's local storage. No accounts, no server, no
@@ -803,12 +1030,16 @@ function viewAbout(){
    Router + events
    ====================================================================== */
 function render(){
+  if(view !== "check") { stopCheckTimer(); check = null; }
   if(!S.onboarded && !diag) { renderNav(); viewOnboard(); return; }
   if(diag){ renderNav(); viewDiagnostic(); return; }
   renderNav();
-  ({today:viewToday, review:viewReview, log:viewLog,
-    dash:viewDash, reflect:viewReflect, about:viewAbout}[view] || viewToday)();
+  ({today:viewToday, review:viewReview, log:viewLog, dash:viewDash,
+    reflect:viewReflect, check:viewCheck, about:viewAbout}[view] || viewToday)();
   window.scrollTo(0,0);
+  // move focus to the heading so keyboard and screen-reader users land on the
+  // new content instead of back at the top of the nav
+  const h = app.querySelector("h1[tabindex]"); if(h) h.focus({preventScroll:true});
 }
 
 function pickScale(wrap, btn, onPick){
@@ -854,7 +1085,7 @@ document.addEventListener("click", e => {
   }
 
   if(t.dataset.review){ startSession([Number(t.dataset.review)]); return; }
-  if(t.id === "start-session"){ startSession(dueList(today()).map(p=>p.id)); return; }
+  if(t.id === "start-session"){ startSession(sessionBudget(today()).take.map(p=>p.id)); return; }
 
   // review: prediction
   const ps = t.closest("#pred-scale");
@@ -887,6 +1118,51 @@ document.addEventListener("click", e => {
   const ls = t.closest("#lg-scale");
   if(ls){ pickScale(ls, t, lv => { ls.dataset.lv = lv;
     document.getElementById("lg-save").disabled = false; }); return; }
+  // ----- delayed retention check -----
+  if(t.id === "ck-start"){
+    check = {stage:"run", items:buildCheckItems(), i:0, scoreIdx:0,
+             endsAt: Date.now() + CHECK_MINUTES*60000, seconds:0};
+    viewCheck();
+    stopCheckTimer();
+    checkTimer = setInterval(() => {
+      const el = document.getElementById("ck-clock");
+      if(!el || !check || check.stage !== "run"){ return; }
+      const left = Math.max(0, Math.round((check.endsAt - Date.now())/1000));
+      el.textContent = `${String(Math.floor(left/60)).padStart(2,"0")}:${String(left%60).padStart(2,"0")}`;
+      el.parentElement.classList.toggle("low", left <= 120);
+      if(left === 0){                       // time is up: bank answers, go to scoring
+        const box = document.getElementById("ck-a");
+        if(box) check.items[check.i].answer = box.value.trim();
+        check.seconds = CHECK_MINUTES*60;
+        stopCheckTimer(); check.stage = "score"; render();
+      }
+    }, 1000);
+    return;
+  }
+  if(t.id === "ck-next"){
+    check.items[check.i].answer = document.getElementById("ck-a").value.trim();
+    if(check.i + 1 < check.items.length){ check.i++; viewCheck(); }
+    else{
+      check.seconds = CHECK_MINUTES*60 - Math.max(0, Math.round((check.endsAt - Date.now())/1000));
+      stopCheckTimer(); check.stage = "score"; render();
+    }
+    return;
+  }
+  const cks = t.closest("#ck-scale");
+  if(cks){ pickScale(cks, t, lv => { cks.dataset.lv = lv;
+    document.getElementById("ck-score-next").disabled = false; }); return; }
+  if(t.id === "ck-score-next"){
+    check.items[check.scoreIdx].score = Number(document.getElementById("ck-scale").dataset.lv);
+    if(check.scoreIdx + 1 < check.items.length){ check.scoreIdx++; viewCheck(); }
+    else { finishCheck(); render(); }
+    return;
+  }
+
+  if(t.id === "sm-save"){
+    S.sessionMinutes = Math.min(120, Math.max(5, Number(document.getElementById("sm").value)||20));
+    save(); go("today"); return;
+  }
+
   if(t.id === "lg-save"){
     const id = Number(document.getElementById("lg-p").value);
     const lv = Number(document.getElementById("lg-scale").dataset.lv);
@@ -894,6 +1170,28 @@ document.addEventListener("click", e => {
     c.log.push({at:today(), pred:null, score:lv, sketch:document.getElementById("lg-s").value.trim()});
     schedule(c, lv, today());
     save(); go("today"); return;
+  }
+});
+
+/* ---------- keyboard ----------
+   Every control is a real button, so Tab and Enter already work. These add the
+   shortcuts that make a review session workable without reaching for a mouse:
+   0-3 picks a rubric level, Enter commits. */
+document.addEventListener("keydown", e => {
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+  const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+
+  if(/^[0-3]$/.test(e.key) && !inField){
+    const scale = document.querySelector("#pred-scale, #score-scale, #ck-scale, #lg-scale, #dg-scale");
+    if(scale){
+      const btn = scale.querySelector(`button[data-lv="${e.key}"]`);
+      if(btn){ e.preventDefault(); btn.click(); }
+      return;
+    }
+  }
+  if(e.key === "Enter" && !(inField && document.activeElement.tagName === "TEXTAREA")){
+    const primary = app.querySelector(".btn.key:not(:disabled)");
+    if(primary){ e.preventDefault(); primary.click(); }
   }
 });
 

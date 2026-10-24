@@ -187,14 +187,12 @@ td.n{font-family:var(--mono); font-variant-numeric:tabular-nums}
 </head>
 <body>
 
-<a class="skip" href="#app">Skip to main content</a>
-
 <header class="topbar">
   <div class="brand">Interval<span>/</span>algorithms</div>
   <nav id="nav"></nav>
 </header>
 
-<main id="app" tabindex="-1"></main>
+<main id="app"></main>
 
 <script>
 "use strict";
@@ -276,8 +274,39 @@ function load(){
   try{ const raw=localStorage.getItem(KEY); S = raw ? JSON.parse(raw) : blank(); }
   catch(e){ S = blank(); }
   if(!S || typeof S!=="object") S = blank();
-  if(!Array.isArray(S.checks)) S.checks = [];   // state written by an earlier build
+  // State written by an earlier build may be missing fields. Coerce rather than
+  // trust: Math.max(1, NaN) is NaN, so one absent number empties the whole queue.
+  if(!Array.isArray(S.checks)) S.checks = [];
+  S.sessionMinutes = Math.min(120, Math.max(5, Number(S.sessionMinutes) || 20));
+  rollDemoForward();
 }
+/* The demo writes absolute dates, so a demo seeded a week ago reads as neglect
+   rather than as the showcase it is meant to be. Roll the whole thing forward
+   by the elapsed time instead, which keeps any reviews the visitor did while
+   restoring the spread the demo was designed to show. The anchor is a local
+   midnight, so subtracting two of them stays exact across a daylight-saving
+   change, which a days-times-86400000 shift does not. Real accounts are left
+   alone: only S.demo state moves. */
+function rollDemoForward(){
+  if(!S.demo) return;
+  if(typeof S.demoAnchor !== "number"){
+    // seeded by an older build: recover the anchor from the seed offset
+    S.demoAnchor = (typeof S.demoDay === "number")
+      ? S.demoDay*DAY : S.createdAt + 42*DAY;
+  }
+  const shift = today() - S.demoAnchor;
+  if(shift <= 0) return;
+  Object.values(S.cards).forEach(c => {
+    if(c.due !== null) c.due += shift;
+    c.log.forEach(e => { e.at += shift; });
+  });
+  S.checks.forEach(k => { k.at += shift; });
+  S.createdAt += shift;
+  if(S.targetDate) S.targetDate = iso(new Date(S.targetDate).getTime() + shift);
+  S.demoAnchor = today();
+  save();
+}
+
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
 
 function card(id){
@@ -356,7 +385,8 @@ function overdueCount(now){
    onto the learner, which is the thing this tool exists to remove. */
 function sessionBudget(now){
   const due = dueList(now);
-  const fits = Math.max(1, Math.floor(S.sessionMinutes / MIN_PER_REVIEW));
+  const mins = Number(S.sessionMinutes) || 20;
+  const fits = Math.max(1, Math.floor(mins / MIN_PER_REVIEW));
   return {due, take: due.slice(0, fits), deferred: Math.max(0, due.length - fits), fits};
 }
 
@@ -425,6 +455,7 @@ const DEMO_PLAN = [
 function seedDemo(){
   S = blank();
   S.onboarded = true; S.demo = true;
+  S.demoAnchor = today();
   // a plausible weeknight commitment, and short enough that the budget visibly
   // bites: 12 minutes is four reviews, so two of the six due are held back
   S.sessionMinutes = 12;
@@ -509,18 +540,18 @@ let obStep = 0;
 function viewOnboard(){
   const bars = [0,1,2].map(i=>`<i class="${i<=obStep?'on':''}"></i>`).join("");
   const panes = [
-    `<h1 tabindex="-1">What this tool is for</h1>
+    `<h1>What this tool is for</h1>
      <p class="lede">Interval does not run your code and does not tell you whether an answer is
      correct. The platform you already practise on does that. This tool tracks one thing instead:
      whether you can still reconstruct a solution weeks after you first solved it.</p>
      <p class="lede">The measure of progress here is durable retrieval, not problems completed.</p>`,
-    `<h1 tabindex="-1">Review will feel harder than rereading</h1>
+    `<h1>Review will feel harder than rereading</h1>
      <p class="lede">Every review starts by hiding your own notes and asking you to rebuild the
      method from memory. That is slower and less pleasant than reading your notes back, and it
      feels like it is working less well. It is working better.</p>
      <p class="lede">Expect to be wrong about what you know. The dashboard tracks the gap between
      how confident you felt and how much you actually recalled.</p>`,
-    `<h1 tabindex="-1">Set your session shape</h1>
+    `<h1>Set your session shape</h1>
      <div class="field" style="margin-top:18px">
        <label for="ob-min">Minutes you can commit to on a normal day</label>
        <input id="ob-min" type="number" min="5" max="120" step="5" value="${S.sessionMinutes}">
@@ -552,7 +583,7 @@ function viewDiagnostic(){
   const p = DECK.find(x=>x.id===diag.ids[diag.i]);
   app.innerHTML = `<div class="narrow">
     <div class="h-sec">Diagnostic ${diag.i+1} of ${diag.ids.length}</div>
-    <h1 tabindex="-1">${p.id}. ${esc(p.t)}</h1>
+    <h1>${p.id}. ${esc(p.t)}</h1>
     <p class="lede" style="margin-top:10px">${esc(p.q)}</p>
     <p class="lede">Attempted cold, with nothing to look at. This is not scored — it only sets
     where each problem enters the schedule.</p>
@@ -655,7 +686,7 @@ function startSession(ids){
 function viewReview(){
   if(!session || session.i >= session.ids.length){
     app.innerHTML = `<div class="narrow">
-      <h1 tabindex="-1">Session complete</h1>
+      <h1>Session complete</h1>
       <p class="lede" style="margin-top:12px">Every due problem has been rescheduled. The next
       interval for each one is set from the level you recorded, not from the clock.</p>
       <div class="rowbtns">
@@ -669,7 +700,7 @@ function viewReview(){
   const head = `<div class="h-sec">Review ${session.i+1} of ${session.ids.length}
     &nbsp;<span class="pill">interval ${c.interval||0}d</span>
     &nbsp;<span class="pill">ease ${c.ease.toFixed(2)}</span></div>
-    <h1 tabindex="-1">${p.id}. ${esc(p.t)}</h1>
+    <h1>${p.id}. ${esc(p.t)}</h1>
     <p class="lede" style="margin-top:10px">${esc(p.q)}</p>`;
 
   if(session.stage === "recall"){
@@ -681,8 +712,7 @@ function viewReview(){
       <label>Before you look: how much do you think you just recovered?</label>
       <div class="scale" id="pred-scale">
         ${RUBRIC.map(r=>`<button data-lv="${r.lv}" aria-pressed="${session.pred===r.lv}">
-          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span>
-          <span class="kbd">${r.lv}</span></button>`).join("")}
+          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span></button>`).join("")}
       </div>
       <div class="rowbtns">
         <button class="btn key" id="reveal" ${session.pred===null?"disabled":""}>Reveal my last sketch</button>
@@ -701,8 +731,7 @@ function viewReview(){
       <div class="h-sec">Score it against the rubric</div>
       <div class="scale" id="score-scale">
         ${RUBRIC.map(r=>`<button data-lv="${r.lv}" aria-pressed="false">
-          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span>
-          <span class="kbd">${r.lv}</span></button>`).join("")}
+          <span class="lv">${r.lv}</span><span class="d">${esc(r.d)}</span></button>`).join("")}
       </div>
       <div class="rowbtns"><button class="btn key" id="commit" disabled>Score and schedule</button></div>
       <p class="foot">You predicted level ${session.pred}.</p></div>`;
@@ -713,7 +742,7 @@ function viewReview(){
   const res = session.result;
   app.innerHTML = `<div class="narrow">${head}
     <div class="h-sec">Next interval</div>
-    <div class="verdict reveal" role="status" aria-live="polite">
+    <div class="verdict reveal">
       ${res.before?`<span class="was">${res.before}d</span>`:""}
       <span class="now">${res.after}d</span>
       <span class="u">next due ${fmtDate(c.due)}</span>
@@ -735,7 +764,7 @@ function viewLog(){
   const untracked = DECK.filter(p => !S.cards[p.id] || !S.cards[p.id].log.length);
   const list = untracked.length ? untracked : DECK;
   app.innerHTML = `<div class="narrow">
-    <h1 tabindex="-1">Log a problem you solved</h1>
+    <h1>Log a problem you solved</h1>
     <p class="lede" style="margin-top:10px">Solve it wherever you normally do. Logging it here is
     what puts it on a schedule — write the sketch while the solution is still fresh, because that
     sketch is what you will be asked to reconstruct later.</p>
@@ -771,7 +800,7 @@ function viewDash(){
   const {m, n, mean:meanGap, max:mMax} = calibration();
 
   app.innerHTML = `<div class="wide">
-    <h1 tabindex="-1">Dashboard</h1>
+    <h1>Dashboard</h1>
     <p class="lede" style="margin-top:10px">Two numbers only, and both of them are yours alone:
     how much you are modelled to retain, and how wrong your sense of that has been. There is
     nothing here comparing you to anyone else.</p>
@@ -925,8 +954,8 @@ function viewCheck(){
            rather than a finding.`
         : `A gap of ${gap.toFixed(2)} levels. The patterns are travelling to problems you have never
            seen, which is the point.`}</p>
-    <p class="lede">Took <span class="num">${Math.floor(res.seconds/60)}:${String(res.seconds%60).padStart(2,"0")}</span>
-    of the ${CHECK_MINUTES} minutes allowed. No interval changed.</p>
+    <p class="lede">Took ${Math.floor(res.seconds/60)} minutes ${res.seconds%60} seconds of the
+    ${CHECK_MINUTES} allowed. No interval changed.</p>
     <div class="rowbtns">
       <button class="btn key" data-go="today">Back to today</button>
       <button class="btn" data-go="dash">Dashboard</button></div>
@@ -960,7 +989,7 @@ function viewReflect(){
     const n=daysBetween(now,c.due); if(n>=0&&n<=7) load++;});
 
   app.innerHTML = `<div class="narrow">
-    <h1 tabindex="-1">This week</h1>
+    <h1>This week</h1>
     <p class="lede" style="margin-top:10px">Built from your own data. The point of reading it is to
     decide what to do next week, not to score the week you just had.</p>
 
@@ -988,7 +1017,7 @@ function viewReflect(){
 /* ---------- about ---------- */
 function viewAbout(){
   app.innerHTML = `<div class="narrow">
-    <h1 tabindex="-1">About this prototype</h1>
+    <h1>About this prototype</h1>
     <p class="lede" style="margin-top:12px">Interval is a learner-centered management tool for
     people preparing for technical interviews on their own. Practice platforms record everything
     you do and schedule nothing; this schedules what you have already recorded.</p>
